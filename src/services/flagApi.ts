@@ -6,12 +6,32 @@ import {
   rollbackFlag,
   writeDatabase,
 } from '@/services/database'
+import {
+  alignRolloutOrder,
+  confirmBatchEnv,
+  createBatch,
+  dualApprove,
+  getBatch,
+  getBatchLiveViews,
+  invalidateBatchesForKey,
+  listBatches,
+  publishBatch,
+  rebuildBatch,
+  resolveDependency,
+  revalidateBatch,
+  rollbackBatch,
+  simulateEnvChange,
+  syncClientBaseline,
+} from '@/services/batches'
 import type {
   AuditEvent,
+  CreateBatchPayload,
   DashboardData,
+  EnvRuntimeState,
   FeatureFlag,
   FlagFilter,
   ImpactIssue,
+  ReleaseBatch,
   ReviewPayload,
 } from '@/types'
 
@@ -21,7 +41,7 @@ const delay = (milliseconds = 180) =>
 export const flagApi = createApi({
   reducerPath: 'flagApi',
   baseQuery: fakeBaseQuery<{ message: string }>(),
-  tagTypes: ['Flags', 'Flag', 'Issues', 'Audit', 'Dashboard'],
+  tagTypes: ['Flags', 'Flag', 'Issues', 'Audit', 'Dashboard', 'Batches', 'Batch'],
   endpoints: (builder) => ({
     getDashboard: builder.query<DashboardData, void>({
       async queryFn() {
@@ -92,10 +112,12 @@ export const flagApi = createApi({
             createdAt: new Date().toISOString(),
           })
         }
+        // 来源环境/依赖/版本/灰度阶段被改动：批准中的同 Key 候选立即失效
+        invalidateBatchesForKey(db, next.key, next.lastChangedBy)
         writeDatabase(db)
         return { data: next }
       },
-      invalidatesTags: ['Flags', 'Dashboard', 'Audit'],
+      invalidatesTags: ['Flags', 'Dashboard', 'Audit', 'Batches'],
     }),
     submitForReview: builder.mutation<FeatureFlag, { id: string; actor: string }>({
       async queryFn({ id, actor }) {
@@ -125,6 +147,7 @@ export const flagApi = createApi({
         'Flags',
         'Dashboard',
         'Audit',
+        'Batches',
         { type: 'Flag', id: arg.id },
       ],
     }),
@@ -141,6 +164,7 @@ export const flagApi = createApi({
         'Flags',
         'Dashboard',
         'Audit',
+        'Batches',
         { type: 'Flag', id: arg.id },
       ],
     }),
@@ -157,8 +181,146 @@ export const flagApi = createApi({
         'Flags',
         'Dashboard',
         'Audit',
+        'Batches',
         { type: 'Flag', id: arg.id },
       ],
+    }),
+    getBatches: builder.query<ReleaseBatch[], void>({
+      async queryFn() {
+        await delay()
+        return { data: listBatches() }
+      },
+      providesTags: ['Batches'],
+    }),
+    getBatchDetail: builder.query<{ batch: ReleaseBatch; live: EnvRuntimeState[] }, string>({
+      async queryFn(id) {
+        await delay()
+        const batch = getBatch(id)
+        if (!batch) return { error: { message: '批次不存在' } }
+        return { data: { batch, live: getBatchLiveViews(batch) } }
+      },
+      providesTags: (_result, _error, id) => [{ type: 'Batch', id }, 'Batches'],
+    }),
+    createBatch: builder.mutation<ReleaseBatch, CreateBatchPayload>({
+      async queryFn(payload) {
+        await delay(260)
+        try {
+          return { data: createBatch(payload) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '创建批次失败' } }
+        }
+      },
+      invalidatesTags: ['Batches', 'Audit'],
+    }),
+    confirmBatch: builder.mutation<ReleaseBatch, { id: string; env: CreateBatchPayload['sourceEnv']; actor: string; comment?: string }>({
+      async queryFn(payload) {
+        await delay(220)
+        try {
+          return { data: confirmBatchEnv(payload.id, payload.env, payload.actor, payload.comment) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '批准失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    dualApproveBatch: builder.mutation<{ winner: ReleaseBatch; loser: ReleaseBatch }, { actor: string }>({
+      async queryFn({ actor }) {
+        await delay(260)
+        try {
+          return { data: dualApprove(actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '双窗口裁决失败' } }
+        }
+      },
+      invalidatesTags: ['Batches', 'Audit'],
+    }),
+    revalidateBatch: builder.mutation<ReleaseBatch, { id: string; actor: string }>({
+      async queryFn({ id, actor }) {
+        await delay(220)
+        try {
+          return { data: revalidateBatch(id, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '重新校验失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    resolveDependencyBlocker: builder.mutation<ReleaseBatch, { id: string; blockerId: string; actor: string }>({
+      async queryFn({ id, blockerId, actor }) {
+        await delay(220)
+        try {
+          return { data: resolveDependency(id, blockerId, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '修复失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Flags', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    syncBaselineBlocker: builder.mutation<ReleaseBatch, { id: string; blockerId: string; actor: string }>({
+      async queryFn({ id, blockerId, actor }) {
+        await delay(220)
+        try {
+          return { data: syncClientBaseline(id, blockerId, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '同步基线失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    alignOrderBlocker: builder.mutation<ReleaseBatch, { id: string; blockerId: string; actor: string }>({
+      async queryFn({ id, blockerId, actor }) {
+        await delay(220)
+        try {
+          return { data: alignRolloutOrder(id, blockerId, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '对齐灰度失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Flags', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    publishBatch: builder.mutation<ReleaseBatch, { id: string; actor: string }>({
+      async queryFn({ id, actor }) {
+        await delay(300)
+        try {
+          return { data: publishBatch(id, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '发布失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Flags', 'Dashboard', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    rollbackBatch: builder.mutation<ReleaseBatch, { id: string; actor: string; reason: string }>({
+      async queryFn({ id, actor, reason }) {
+        await delay(300)
+        try {
+          return { data: rollbackBatch(id, actor, reason) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '整批回滚失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Flags', 'Dashboard', 'Audit', { type: 'Batch', id: arg.id }],
+    }),
+    rebuildBatch: builder.mutation<ReleaseBatch, { id: string; actor: string }>({
+      async queryFn({ id, actor }) {
+        await delay(260)
+        try {
+          return { data: rebuildBatch(id, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '重建批次失败' } }
+        }
+      },
+      invalidatesTags: ['Batches', 'Audit'],
+    }),
+    simulateEnvChange: builder.mutation<ReleaseBatch, { id: string; env: CreateBatchPayload['sourceEnv']; actor: string }>({
+      async queryFn({ id, env, actor }) {
+        await delay(200)
+        try {
+          return { data: simulateEnvChange(id, env, actor) }
+        } catch (error) {
+          return { error: { message: error instanceof Error ? error.message : '模拟改动失败' } }
+        }
+      },
+      invalidatesTags: (_result, _error, arg) => ['Batches', 'Flags', 'Audit', { type: 'Batch', id: arg.id }],
     }),
     getIssues: builder.query<ImpactIssue[], { category?: string; resolved?: boolean }>({
       async queryFn(filters) {
@@ -197,4 +359,17 @@ export const {
   useRollbackFlagMutation,
   useGetIssuesQuery,
   useGetAuditQuery,
+  useGetBatchesQuery,
+  useGetBatchDetailQuery,
+  useCreateBatchMutation,
+  useConfirmBatchMutation,
+  useDualApproveBatchMutation,
+  useRevalidateBatchMutation,
+  useResolveDependencyBlockerMutation,
+  useSyncBaselineBlockerMutation,
+  useAlignOrderBlockerMutation,
+  usePublishBatchMutation,
+  useRollbackBatchMutation,
+  useRebuildBatchMutation,
+  useSimulateEnvChangeMutation,
 } = flagApi

@@ -38,7 +38,32 @@ const actionLabel: Record<string, string> = {
   unfrozen: '解冻',
   'rolled-back': '回滚',
   'rollout-adjusted': '调整灰度',
+  'batch-created': '批次创建',
+  'batch-confirmed': '批次批准',
+  'batch-invalidated': '批次失效',
+  'batch-superseded': '批次被取代',
+  'batch-published': '批次发布',
+  'batch-blocked': '批次阻断',
+  'batch-resolved': '阻断修复',
+  'batch-rebuilt': '批次重建',
+  'batch-released': '批次放行',
+  'batch-reverted': '整批回滚',
+  'env-changed': '环境单独改动',
 }
+
+const batchActions = new Set([
+  'batch-created',
+  'batch-confirmed',
+  'batch-invalidated',
+  'batch-superseded',
+  'batch-published',
+  'batch-blocked',
+  'batch-resolved',
+  'batch-rebuilt',
+  'batch-released',
+  'batch-reverted',
+  'env-changed',
+])
 
 export function AuditPage() {
   const { data: flags = [] } = useGetFlagsQuery({})
@@ -137,6 +162,8 @@ export function AuditPage() {
                     </TableCell>
                     <TableCell>
                       <Typography component={Link} to={`/flags/${event.flagId}`} variant="body2" fontWeight={700}>{event.flagKey}</Typography>
+                      {event.batchId && <Chip size="small" color="primary" variant="outlined" label={event.batchId} sx={{ ml: 0.5 }} />}
+                      {event.env && <Chip size="small" variant="outlined" label={{ dev: '开发', staging: '预发', production: '生产' }[event.env]} sx={{ ml: 0.5 }} />}
                       {relatedFlag && <FlagStatusChip status={relatedFlag.status} />}
                     </TableCell>
                     <TableCell sx={{ maxWidth: 420 }}>{event.summary}</TableCell>
@@ -145,18 +172,28 @@ export function AuditPage() {
                     </TableCell>
                     <TableCell>{event.affectedUsers.toLocaleString()}</TableCell>
                     <TableCell align="right">
-                      <Button
-                        size="small"
-                        color="error"
-                        startIcon={<UndoOutlinedIcon />}
-                        disabled={!relatedFlag || relatedFlag.status === 'rolled-back'}
-                        onClick={() => {
-                          setSelectedFlagId(event.flagId)
-                          setReason('生产异常触发人工回滚，停止继续放量。')
-                        }}
-                      >
-                        回滚
-                      </Button>
+                      {batchActions.has(event.action) ? (
+                        event.action === 'batch-reverted' ? (
+                          <Button component={Link} to="/batches" size="small">
+                            查看批次
+                          </Button>
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">批次轨迹留存</Typography>
+                        )
+                      ) : (
+                        <Button
+                          size="small"
+                          color="error"
+                          startIcon={<UndoOutlinedIcon />}
+                          disabled={!relatedFlag || relatedFlag.status === 'rolled-back'}
+                          onClick={() => {
+                            setSelectedFlagId(event.flagId)
+                            setReason('生产异常触发人工回滚，停止继续放量。')
+                          }}
+                        >
+                          回滚
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 )

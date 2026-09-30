@@ -22,6 +22,8 @@ import {
 import PlayArrowOutlinedIcon from '@mui/icons-material/PlayArrowOutlined'
 import UndoOutlinedIcon from '@mui/icons-material/UndoOutlined'
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline'
+import BatchPredictionOutlinedIcon from '@mui/icons-material/BatchPredictionOutlined'
+import { Link } from 'react-router-dom'
 import { useGetFlagsQuery, useRollbackFlagMutation, useSaveFlagMutation } from '@/services/flagApi'
 import { FlagStatusChip } from '@/components/FlagStatusChip'
 
@@ -110,15 +112,20 @@ export function RolloutPage() {
             逐步放量、冻结流量或回滚生产配置，每次变化都记录影响范围与操作者。
           </Typography>
         </Box>
-        <TextField
-          select
-          label="发布目标"
-          value={selectedId}
-          onChange={(event) => setSelectedId(event.target.value)}
-          sx={{ width: 300 }}
-        >
-          {flags.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
-        </TextField>
+        <Stack direction="row" spacing={1}>
+          <Button component={Link} to="/batches" variant="outlined" startIcon={<BatchPredictionOutlinedIcon />}>
+            多环境发布批次
+          </Button>
+          <TextField
+            select
+            label="发布目标"
+            value={selectedId}
+            onChange={(event) => setSelectedId(event.target.value)}
+            sx={{ width: 300 }}
+          >
+            {flags.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+          </TextField>
+        </Stack>
       </Box>
 
       {message && <Alert severity={message.includes('失败') ? 'error' : 'success'} onClose={() => setMessage('')} sx={{ mb: 2 }}>{message}</Alert>}

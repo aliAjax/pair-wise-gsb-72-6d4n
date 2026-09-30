@@ -1,10 +1,12 @@
 import type {
   AuditEvent,
   DashboardData,
+  EnvRuntimeState,
   FeatureFlag,
   ImpactIssue,
   ReviewPayload,
 } from '@/types'
+import { ensureSeedBatches, invalidateBatchesForKey } from '@/services/batches'
 
 const STORAGE_KEY = 'feature-flag-release-console-v1'
 
@@ -12,7 +14,90 @@ export interface Database {
   flags: FeatureFlag[]
   audit: AuditEvent[]
   issues: ImpactIssue[]
+  /** 同一 Key 在非来源环境的实时发布状态 */
+  envStates: EnvRuntimeState[]
+  /** 各环境当前外放的最低客户端基线（发布前闸门 2 使用） */
+  clientBaselines: Record<'dev' | 'staging' | 'production', string>
+  /** 多环境发布批次 */
+  batches: import('@/types').ReleaseBatch[]
 }
+
+const defaultClientBaselines = {
+  dev: '8.18.0',
+  staging: '8.17.0',
+  production: '8.17.0',
+} as const
+
+/** 非来源环境的当前线上状态（与各开关页面展示口径一致：DEV 常全量、STG 居中） */
+const buildEnvStates = (flags: FeatureFlag[]): EnvRuntimeState[] => {
+  const fallback: Record<string, { staging: { percentage: number; enabled: boolean; status: 'active' | 'frozen' | 'rolled-back' }; production: { percentage: number; enabled: boolean; status: 'active' | 'frozen' | 'rolled-back' }; dev: { percentage: number; enabled: boolean; status: 'active' | 'frozen' | 'rolled-back' } }> = {
+    'checkout.express-pay-v2': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      staging: { percentage: 20, enabled: true, status: 'active' },
+      production: { percentage: 0, enabled: false, status: 'frozen' },
+    },
+    'catalog.smart-recommendation': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      staging: { percentage: 50, enabled: true, status: 'active' },
+      production: { percentage: 35, enabled: true, status: 'active' },
+    },
+    'console.billing-export-v3': {
+      dev: { percentage: 5, enabled: true, status: 'active' },
+      staging: { percentage: 0, enabled: false, status: 'frozen' },
+      production: { percentage: 0, enabled: false, status: 'frozen' },
+    },
+    'payment.aggregate-router': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      // 批次 001 的依赖回滚阻断项：预发聚合路由被单独回滚
+      staging: { percentage: 0, enabled: false, status: 'rolled-back' },
+      production: { percentage: 100, enabled: true, status: 'active' },
+    },
+    'feature.realtime-profile': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      staging: { percentage: 80, enabled: true, status: 'frozen' },
+      production: { percentage: 60, enabled: true, status: 'frozen' },
+    },
+    'campaign.new-editor': {
+      dev: { percentage: 5, enabled: false, status: 'frozen' },
+      staging: { percentage: 0, enabled: false, status: 'rolled-back' },
+      production: { percentage: 0, enabled: false, status: 'rolled-back' },
+    },
+    'infra.async-task-queue-v2': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      staging: { percentage: 100, enabled: true, status: 'active' },
+      production: { percentage: 0, enabled: false, status: 'frozen' },
+    },
+    'checkout.legacy-coupon-overlay': {
+      dev: { percentage: 100, enabled: true, status: 'active' },
+      staging: { percentage: 12, enabled: true, status: 'frozen' },
+      production: { percentage: 12, enabled: true, status: 'frozen' },
+    },
+  }
+
+  const states: EnvRuntimeState[] = []
+  for (const flag of flags) {
+    const spec = fallback[flag.key]
+    for (const env of ['dev', 'staging', 'production'] as const) {
+      if (env === flag.environment) continue
+      const state = spec[env]
+      states.push({
+        key: flag.key,
+        env,
+        enabled: state.enabled,
+        status: state.status,
+        percentage: state.percentage,
+        audienceRules: state.percentage > 0 ? structuredClone(flag.audienceRules) : [],
+        minClientVersion: flag.minClientVersion[env],
+        stageLabel: state.percentage > 0 ? `${env === 'dev' ? '开发' : '预发'}灰度 ${state.percentage}%` : '未开始灰度',
+        stageSteps: [],
+        dependencies: structuredClone(flag.dependencies),
+        dependencyStates: [],
+      })
+    }
+  }
+  return states
+}
+
 
 const flags: FeatureFlag[] = [
   {
@@ -88,8 +173,8 @@ const flags: FeatureFlag[] = [
     team: '云控制台',
     status: 'review',
     environment: 'dev',
-    enabled: false,
-    rolloutPercentage: 0,
+    enabled: true,
+    rolloutPercentage: 5,
     audienceRules: [
       { id: 'r-103-1', attribute: 'account.type', operator: 'equals', value: 'enterprise', negate: false },
     ],
@@ -100,7 +185,7 @@ const flags: FeatureFlag[] = [
     metricNames: [],
     deadCodeStatus: 'candidate',
     rolloutSteps: [
-      { id: 's-301', percentage: 5, audience: '内部测试企业', startedAt: '2026-10-08T10:00:00+08:00', status: 'planned', guardrails: ['任务成功率 > 98%'] },
+      { id: 's-301', percentage: 5, audience: '内部测试企业', startedAt: '2026-10-08T10:00:00+08:00', status: 'running', guardrails: ['任务成功率 > 98%'] },
     ],
     createdAt: '2026-09-18T11:10:00+08:00',
     updatedAt: '2026-09-28T18:20:00+08:00',
@@ -367,7 +452,18 @@ const audit: AuditEvent[] = [
   },
 ]
 
-export const seedDatabase = (): Database => ({ flags, audit, issues })
+export const seedDatabase = (): Database => {
+  const db: Database = {
+    flags,
+    audit,
+    issues,
+    envStates: buildEnvStates(flags),
+    clientBaselines: { ...defaultClientBaselines },
+    batches: [],
+  }
+  ensureSeedBatches(db)
+  return db
+}
 
 export const readDatabase = (): Database => {
   const raw = localStorage.getItem(STORAGE_KEY)
@@ -377,7 +473,21 @@ export const readDatabase = (): Database => {
     return seed
   }
   try {
-    return JSON.parse(raw) as Database
+    const parsed = JSON.parse(raw) as Partial<Database>
+    const database: Database = {
+      flags: parsed.flags ?? [],
+      audit: parsed.audit ?? [],
+      issues: parsed.issues ?? [],
+      envStates: parsed.envStates ?? buildEnvStates(parsed.flags ?? flags),
+      clientBaselines: { ...defaultClientBaselines, ...(parsed.clientBaselines ?? {}) },
+      batches: parsed.batches ?? [],
+    }
+    // 旧版本数据：补齐多环境视图后生成示例批次
+    if (!parsed.envStates || !parsed.batches) {
+      ensureSeedBatches(database)
+      writeDatabase(database)
+    }
+    return database
   } catch {
     const seed = seedDatabase()
     writeDatabase(seed)
@@ -413,6 +523,8 @@ export const applyReview = (flagId: string, payload: ReviewPayload): FeatureFlag
   if (payload.freezeUntil && payload.decision === 'approved') {
     flag.rollbackConditions.push(`冻结至 ${payload.freezeUntil}，期间禁止扩大流量`)
   }
+  // 批准阶段来源环境被改动：对应 Key 的收集中批次立即失效
+  invalidateBatchesForKey(db, flag.key, payload.reviewer)
   writeDatabase(db)
   return flag
 }
@@ -442,6 +554,7 @@ export const rollbackFlag = (flagId: string, actor: string, reason: string): Fea
     affectedUsers: Math.round(980000 * (flag.rolloutPercentage / 100)),
     createdAt: new Date().toISOString(),
   })
+  invalidateBatchesForKey(db, flag.key, actor)
   writeDatabase(db)
   return flag
 }

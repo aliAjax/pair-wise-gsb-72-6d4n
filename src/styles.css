@@ -756,6 +756,51 @@ a:hover {
   color: #d92d20 !important;
 }
 
+.batch-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid #e5e6eb;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.batch-summary > div {
+  padding: 16px 20px;
+  border-right: 1px solid #e5e6eb;
+}
+
+.batch-summary > div:last-child {
+  border-right: 0;
+}
+
+.batch-summary .summary-value {
+  font-size: 24px !important;
+}
+
+.batch-blocker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #ffd9b8;
+  border-left: 4px solid #ff7d00;
+  border-radius: 6px;
+  background: #fffdf8;
+}
+
+.batch-dependency {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  border: 1px solid #e5e6eb;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
 @media (max-width: 1280px) {
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
