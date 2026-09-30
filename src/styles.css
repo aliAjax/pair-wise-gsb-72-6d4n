@@ -756,6 +756,71 @@ a:hover {
   color: #d92d20 !important;
 }
 
+.batch-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(0, 1.5fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.batch-list {
+  display: grid;
+  gap: 10px;
+}
+
+.batch-list-item {
+  padding: 14px;
+  border: 1px solid #e5e6eb;
+  border-radius: 7px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.batch-list-item:hover {
+  border-color: #94bfff;
+}
+
+.batch-list-item.selected {
+  border-color: #165dff;
+  box-shadow: inset 0 0 0 1px #165dff;
+}
+
+.batch-list-item .MuiTypography-caption {
+  display: block;
+  margin-top: 2px;
+}
+
+.snapshot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.snapshot-env {
+  padding: 12px;
+  border: 1px solid #e5e6eb;
+  border-radius: 6px;
+  background: #f7f8fa;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border-bottom: 1px solid #f2f3f5;
+  border-radius: 6px;
+}
+
+.check-row:last-child {
+  border-bottom: 0;
+}
+
+.check-row.blocked {
+  background: #fffafa;
+}
+
 @media (max-width: 1280px) {
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

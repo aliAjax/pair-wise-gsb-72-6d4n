@@ -1,5 +1,19 @@
 export type FlagStatus = 'draft' | 'review' | 'active' | 'frozen' | 'rolled-back'
 export type Environment = 'dev' | 'staging' | 'production'
+export type BatchStatus =
+  | 'pending'
+  | 'approved'
+  | 'released'
+  | 'invalidated'
+  | 'superseded'
+  | 'rolled-back'
+export type BatchCheckKind = 'dependency' | 'client-version' | 'rollout-order'
+
+export const environmentLabels: Record<Environment, string> = {
+  dev: '开发环境',
+  staging: '预发环境',
+  production: '生产环境',
+}
 export type RuleOperator = 'equals' | 'not-equals' | 'contains' | 'in' | 'gte' | 'lte'
 export type IssueSeverity = 'blocker' | 'warning' | 'info'
 export type IssueCategory =
@@ -70,6 +84,13 @@ export interface AuditEvent {
     | 'unfrozen'
     | 'rolled-back'
     | 'rollout-adjusted'
+    | 'batch-created'
+    | 'batch-approved'
+    | 'batch-released'
+    | 'batch-blocked'
+    | 'batch-invalidated'
+    | 'batch-superseded'
+    | 'batch-rolled-back'
   actor: string
   summary: string
   before?: string
@@ -112,4 +133,56 @@ export interface ReviewPayload {
   decision: 'approved' | 'rejected'
   comment: string
   freezeUntil?: string
+}
+
+export interface BatchEnvSnapshot {
+  environment: Environment
+  flagId: string
+  status: FlagStatus
+  enabled: boolean
+  rolloutPercentage: number
+  audienceRules: AudienceRule[]
+  dependencies: Dependency[]
+  minClientVersion: string
+  rolloutSteps: RolloutStep[]
+  fingerprint: string
+}
+
+export interface BatchCheckItem {
+  id: string
+  kind: BatchCheckKind
+  label: string
+  detail: string
+  confirmed: boolean
+  blocked: boolean
+}
+
+export interface ReleaseBatch {
+  id: string
+  key: string
+  name: string
+  sourceEnvironment: Environment
+  targetEnvironments: Environment[]
+  status: BatchStatus
+  revision: number
+  snapshot: BatchEnvSnapshot[]
+  preReleaseSnapshot?: BatchEnvSnapshot[]
+  checks: BatchCheckItem[]
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+  approvedBy?: string
+  approvedAt?: string
+  releasedAt?: string
+  rolledBackAt?: string
+  rollbackReason?: string
+  invalidatedReason?: string
+}
+
+export interface CreateBatchInput {
+  key: string
+  name: string
+  sourceEnvironment: Environment
+  targetEnvironments: Environment[]
+  actor: string
 }

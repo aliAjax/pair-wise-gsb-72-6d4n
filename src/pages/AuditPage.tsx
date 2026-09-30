@@ -38,6 +38,13 @@ const actionLabel: Record<string, string> = {
   unfrozen: '解冻',
   'rolled-back': '回滚',
   'rollout-adjusted': '调整灰度',
+  'batch-created': '创建批次',
+  'batch-approved': '批准批次',
+  'batch-released': '发布批次',
+  'batch-blocked': '批次阻断',
+  'batch-invalidated': '批次失效',
+  'batch-superseded': '批次被取代',
+  'batch-rolled-back': '批次回滚',
 }
 
 export function AuditPage() {
@@ -127,6 +134,7 @@ export function AuditPage() {
             <TableBody>
               {events.map((event) => {
                 const relatedFlag = flags.find((flag) => flag.id === event.flagId)
+                const isBatchEvent = event.flagId.startsWith('batch-')
                 return (
                   <TableRow key={event.id} hover>
                     <TableCell>
@@ -136,7 +144,15 @@ export function AuditPage() {
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography component={Link} to={`/flags/${event.flagId}`} variant="body2" fontWeight={700}>{event.flagKey}</Typography>
+                      <Typography
+                        component={Link}
+                        to={isBatchEvent ? '/batches' : `/flags/${event.flagId}`}
+                        variant="body2"
+                        fontWeight={700}
+                      >
+                        {event.flagKey}
+                      </Typography>
+                      {isBatchEvent && <Chip size="small" variant="outlined" label="发布批次" />}
                       {relatedFlag && <FlagStatusChip status={relatedFlag.status} />}
                     </TableCell>
                     <TableCell sx={{ maxWidth: 420 }}>{event.summary}</TableCell>

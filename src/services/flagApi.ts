@@ -1,27 +1,40 @@
 import { createApi, fakeBaseQuery } from '@reduxjs/toolkit/query/react'
 import {
   applyReview,
+  approveBatch,
+  confirmBatchCheck,
+  createBatch,
   getDashboardStats,
+  invalidateStaleBatches,
   readDatabase,
+  releaseBatch,
+  revalidateBatch,
+  rollbackBatch,
   rollbackFlag,
   writeDatabase,
 } from '@/services/database'
 import type {
   AuditEvent,
+  CreateBatchInput,
   DashboardData,
   FeatureFlag,
   FlagFilter,
   ImpactIssue,
+  ReleaseBatch,
   ReviewPayload,
 } from '@/types'
 
 const delay = (milliseconds = 180) =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 
+const toError = (error: unknown, fallback: string) => ({
+  message: error instanceof Error ? error.message : fallback,
+})
+
 export const flagApi = createApi({
   reducerPath: 'flagApi',
   baseQuery: fakeBaseQuery<{ message: string }>(),
-  tagTypes: ['Flags', 'Flag', 'Issues', 'Audit', 'Dashboard'],
+  tagTypes: ['Flags', 'Flag', 'Issues', 'Audit', 'Dashboard', 'Batches'],
   endpoints: (builder) => ({
     getDashboard: builder.query<DashboardData, void>({
       async queryFn() {
@@ -92,10 +105,11 @@ export const flagApi = createApi({
             createdAt: new Date().toISOString(),
           })
         }
+        invalidateStaleBatches(db)
         writeDatabase(db)
         return { data: next }
       },
-      invalidatesTags: ['Flags', 'Dashboard', 'Audit'],
+      invalidatesTags: ['Flags', 'Dashboard', 'Audit', 'Batches'],
     }),
     submitForReview: builder.mutation<FeatureFlag, { id: string; actor: string }>({
       async queryFn({ id, actor }) {
@@ -184,6 +198,85 @@ export const flagApi = createApi({
       },
       providesTags: ['Audit'],
     }),
+    getBatches: builder.query<ReleaseBatch[], void>({
+      async queryFn() {
+        await delay()
+        return { data: readDatabase().batches }
+      },
+      providesTags: ['Batches'],
+    }),
+    createBatch: builder.mutation<ReleaseBatch, CreateBatchInput>({
+      async queryFn(input) {
+        await delay(260)
+        try {
+          return { data: createBatch(input) }
+        } catch (error) {
+          return { error: toError(error, '创建批次失败') }
+        }
+      },
+      invalidatesTags: ['Batches', 'Audit'],
+    }),
+    approveBatch: builder.mutation<
+      ReleaseBatch,
+      { id: string; actor: string; expectedRevision: number }
+    >({
+      async queryFn({ id, actor, expectedRevision }) {
+        await delay(260)
+        try {
+          return { data: approveBatch(id, actor, expectedRevision) }
+        } catch (error) {
+          return { error: toError(error, '批准批次失败') }
+        }
+      },
+      invalidatesTags: ['Batches', 'Audit'],
+    }),
+    revalidateBatch: builder.mutation<ReleaseBatch, { id: string }>({
+      async queryFn({ id }) {
+        await delay(220)
+        try {
+          return { data: revalidateBatch(id) }
+        } catch (error) {
+          return { error: toError(error, '重新校验失败') }
+        }
+      },
+      invalidatesTags: ['Batches'],
+    }),
+    confirmBatchCheck: builder.mutation<ReleaseBatch, { id: string; checkId: string }>({
+      async queryFn({ id, checkId }) {
+        await delay(220)
+        try {
+          return { data: confirmBatchCheck(id, checkId) }
+        } catch (error) {
+          return { error: toError(error, '确认检查项失败') }
+        }
+      },
+      invalidatesTags: ['Batches'],
+    }),
+    releaseBatch: builder.mutation<
+      ReleaseBatch,
+      { id: string; actor: string; expectedRevision: number }
+    >({
+      async queryFn({ id, actor, expectedRevision }) {
+        await delay(300)
+        try {
+          return { data: releaseBatch(id, actor, expectedRevision) }
+        } catch (error) {
+          return { error: toError(error, '发布批次失败') }
+        }
+      },
+      invalidatesTags: ['Batches', 'Flags', 'Flag', 'Audit', 'Dashboard'],
+    }),
+    rollbackBatch: builder.mutation<ReleaseBatch, { id: string; actor: string; reason: string }>({
+      async queryFn({ id, actor, reason }) {
+        await delay(300)
+        try {
+          return { data: rollbackBatch(id, actor, reason) }
+        } catch (error) {
+          return { error: toError(error, '批次回滚失败') }
+        }
+      },
+      invalidatesTags: ['Batches', 'Flags', 'Flag', 'Audit', 'Dashboard'],
+    }),
   }),
 })
 
@@ -197,4 +290,11 @@ export const {
   useRollbackFlagMutation,
   useGetIssuesQuery,
   useGetAuditQuery,
+  useGetBatchesQuery,
+  useCreateBatchMutation,
+  useApproveBatchMutation,
+  useRevalidateBatchMutation,
+  useConfirmBatchCheckMutation,
+  useReleaseBatchMutation,
+  useRollbackBatchMutation,
 } = flagApi
